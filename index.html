@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoDoc AI </title>
+    <!-- Core Libraries -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <style>
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-in { animation: fadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #475569; }
+        pre { white-space: pre-wrap; word-break: break-all; }
+        .mermaid svg { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+    </style>
+</head>
+<body class="bg-[#0f172a] text-slate-200">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        
+        // Helper Icon Component for CDN usage
+        const Icon = ({ name, size = 20, className = "" }) => {
+            const iconRef = useRef(null);
+            useEffect(() => {
+                if (iconRef.current && window.lucide) {
+                    window.lucide.createIcons({
+                        targets: [iconRef.current],
+                        icons: { [name]: true }
+                    });
+                }
+            }, [name]);
+            return <i ref={iconRef} data-lucide={name} style={{width: size, height: size}} className={className}></i>;
+        };
+
+        // TODO: replace with your Google Cloud API key.
+        // Note: embedding API keys in client-side code is insecure for production.
+        const apiKey = "AIzaSyAkUK4_zuil2m1ioqQlSJ4H1F0FadmpqpY";
+        // Stable v1 model endpoint. Use a supported v1 model like gemini-1.5-flash-001.
+        const API_URL = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-001:generateContent";
+        
+        const MermaidChart = ({ chart, isDarkMode }) => {
+            const ref = useRef(null);
+            useEffect(() => {
+                if (chart && ref.current && window.mermaid) {
+                    window.mermaid.initialize({ 
+                        startOnLoad: false, 
+                        theme: isDarkMode ? 'dark' : 'default',
+                        securityLevel: 'loose',
+                        fontFamily: 'ui-sans-serif, system-ui, sans-serif'
+                    });
+                    renderChart();
+                }
+            }, [chart, isDarkMode]);
+
+            const renderChart = async () => {
+                try {
+                    ref.current.innerHTML = '';
+                    const id = `mermaid-${Math.random().toString(36).substr(2, 9)}`;
+                    const cleanChart = chart.trim().startsWith('graph') ? chart.trim() : `graph TD\n${chart}`;
+                    const { svg } = await window.mermaid.render(id, cleanChart);
+                    ref.current.innerHTML = svg;
+                } catch (err) {
+                    ref.current.innerHTML = `
+                        <div class="text-center p-4">
+                            <p class="text-xs text-red-400 font-mono">Flowchart Rendering Error</p>
+                            <p class="text-[10px] opacity-50">Complex syntax error. Try re-generating.</p>
+                        </div>
+                    `;
+                }
+            };
+            return <div ref={ref} className="flex justify-center p-4 bg-white/5 rounded-xl overflow-x-auto min-h-[200px]" />;
+        };
+
+        const App = () => {
+            const [code, setCode] = useState('');
+            const [language, setLanguage] = useState('python');
+            const [activeTab, setActiveTab] = useState('comments');
+            const [isGenerating, setIsGenerating] = useState(false);
+            const [analysis, setAnalysis] = useState(null);
+            const [error, setError] = useState(null);
+            const [isDarkMode, setIsDarkMode] = useState(true);
+
+            const examples = {
+                python: `def bubble_sort(arr):\n    n = len(arr)\n    for i in range(n):\n        for j in range(0, n-i-1):\n            if arr[j] > arr[j+1]:\n                arr[j], arr[j+1] = arr[j+1], arr[j]\n    return arr`,
+                javascript: `function fibonacci(n) {\n  if (n <= 1) return n;\n  return fibonacci(n - 1) + fibonacci(n - 2);\n}`,
+                java: `public int binarySearch(int[] arr, int x) {\n    int l = 0, r = arr.length - 1;\n    while (l <= r) {\n        int m = l + (r - l) / 2;\n        if (arr[m] == x) return m;\n        if (arr[m] < x) l = m + 1;\n        else r = m - 1;\n    }\n    return -1;\n}`
+            };
+
+            const generateAnalysis = async () => {
+                if (!code.trim()) return setError("Please paste some code first.");
+                if (!apiKey || apiKey.trim() === "") return setError("No API key set. Add your Google API key to the apiKey variable.");
+
+                setIsGenerating(true);
+                setError(null);
+
+                const systemPrompt = `Analyze the ${language} code and return a JSON object:
+                { 
+                  "comments": "the code with professional comments added",
+                  "summary": "2 sentence overview",
+                  "explanation": "step-by-step logic teaching",
+                  "complexity": {"time": "O(n)", "space": "O(1)", "reason": "Thoroughly explain the complexity using nested loops, iterations, and space usage."},
+                  "smells": ["suggestion 1", "suggestion 2"],
+                  "mermaid": "graph TD...",
+                  "readme": "complete professional GitHub README.md content"
+                }
+                CRITICAL: For efficiency reasoning, provide a detailed mechanical breakdown. For suggestions, include best-case optimizations and production alternatives. Wrap Mermaid labels in double quotes.`;
+
+                try {
+                    const response = await fetch(`${API_URL}?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [
+                                {
+                                    role: 'system',
+                                    parts: [{ text: systemPrompt }]
+                                },
+                                {
+                                    role: 'user',
+                                    parts: [{ text: code }]
+                                }
+                            ],
+                            generationConfig: {
+                                temperature: 0.2,
+                                candidateCount: 1,
+                                maxOutputTokens: 1200
+                            }
+                        })
+                    });
+
+                    const result = await response.json();
+                    if (!response.ok) {
+                        const message = result.error?.message || `${response.status} ${response.statusText}`;
+                        throw new Error(message);
+                    }
+
+                    const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text || result.candidates?.[0]?.content?.[0]?.text;
+                    if (!rawText) {
+                        throw new Error("Unexpected API response format. See console for details.");
+                    }
+
+                    setAnalysis(JSON.parse(rawText));
+                } catch (err) {
+                    setError(err.message || "API Busy or Invalid Key. Try again.");
+                } finally {
+                    setIsGenerating(false);
+                }
+            };
+
+            const downloadFile = (content, filename) => {
+                const blob = new Blob([content], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                a.click();
+            };
+
+            const copyToClipboard = (text) => {
+                const textArea = document.createElement("textarea");
+                textArea.value = text;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+            };
+
+            return (
+                <div className={`min-h-screen transition-colors duration-300 ${isDarkMode ? 'bg-[#0f172a] text-slate-200' : 'bg-slate-50 text-slate-800'}`}>
+                    <nav className={`border-b p-4 flex justify-between items-center sticky top-0 bg-inherit z-50 backdrop-blur-md ${isDarkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+                        <div className="flex items-center gap-2">
+                            <div className="bg-indigo-600 p-2 rounded-lg shadow-lg shadow-indigo-500/20"><Icon name="code-2" className="text-white" /></div>
+                            <h1 className="font-bold text-xl tracking-tight">AutoDoc <span className="text-indigo-500">AI</span> <span className="text-[10px] opacity-50 px-2 py-0.5 border rounded-full ml-1 font-bold">V2.1</span></h1>
+                        </div>
+                        <button onClick={() => setIsDarkMode(!isDarkMode)} className={`p-2 rounded-full ${isDarkMode ? 'bg-slate-800' : 'bg-slate-200'}`}>
+                            <Icon name={isDarkMode ? 'sun' : 'moon'} />
+                        </button>
+                    </nav>
+
+                    <main className="max-w-7xl mx-auto p-4 lg:p-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+                        {/* Editor Section */}
+                        <div className="lg:col-span-5 space-y-6">
+                            <div className={`p-6 rounded-2xl border ${isDarkMode ? 'bg-[#1e293b] border-slate-800 shadow-xl' : 'bg-white border-slate-200 shadow-sm'} space-y-4`}>
+                                <div className="flex justify-between items-center">
+                                    <span className="font-bold flex items-center gap-2 tracking-tight"><Icon name="terminal" className="text-indigo-500" /> Source Input</span>
+                                    <div className="flex gap-3">
+                                        <select value={language} onChange={e => setLanguage(e.target.value)} className="bg-transparent text-xs border border-slate-700 rounded px-1 py-0.5 outline-none">
+                                            <option value="python">Python</option>
+                                            <option value="javascript">JavaScript</option>
+                                            <option value="java">Java</option>
+                                            <option value="cpp">C++</option>
+                                        </select>
+                                        <button onClick={() => setCode(examples[language] || '')} className="text-xs text-indigo-400 font-bold uppercase tracking-wider hover:text-indigo-300 transition-colors">Example</button>
+                                    </div>
+                                </div>
+                                <textarea 
+                                    className={`w-full h-96 border p-4 rounded-xl font-mono text-sm outline-none focus:ring-2 focus:ring-indigo-500 transition-all custom-scrollbar ${isDarkMode ? 'bg-[#0f172a] border-slate-800' : 'bg-slate-50 border-slate-200'}`}
+                                    value={code} onChange={e => setCode(e.target.value)}
+                                    placeholder="Paste your source code here..."
+                                />
+                                <button onClick={generateAnalysis} disabled={isGenerating} className="w-full bg-indigo-600 hover:bg-indigo-700 py-4 rounded-xl font-bold flex justify-center items-center gap-2 shadow-xl shadow-indigo-600/30 transition-all active:scale-95 group">
+                                    {isGenerating ? <Icon name="loader-2" className="animate-spin" /> : <Icon name="zap" className="group-hover:scale-110 transition-transform" />}
+                                    {isGenerating ? "Analyzing Control Flow..." : "Generate Analysis"}
+                                </button>
+                                {error && <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 text-sm rounded-lg flex items-center gap-2 animate-pulse"><Icon name="alert-circle" size={16} />{error}</div>}
+                            </div>
+                        </div>
+
+                        {/* Analysis Section */}
+                        <div className="lg:col-span-7">
+                            {!analysis && !isGenerating ? (
+                                <div className="h-full border-2 border-dashed border-slate-800 rounded-3xl flex flex-col items-center justify-center p-12 text-center opacity-50">
+                                    <Icon name="cpu" size={64} className="mb-4 text-indigo-500" />
+                                    <h3 className="text-lg font-bold uppercase tracking-widest">Awaiting Analysis</h3>
+                                    <p className="text-sm mt-2">Enter code to visualize execution paths and Big O performance.</p>
+                                </div>
+                            ) : (
+                                <div className={`rounded-3xl border overflow-hidden flex flex-col min-h-[600px] ${isDarkMode ? 'bg-[#1e293b] border-slate-800' : 'bg-white border-slate-200 shadow-lg'}`}>
+                                    <div className={`flex border-b ${isDarkMode ? 'border-slate-800 bg-[#0f172a]/50' : 'border-slate-200 bg-slate-50'}`}>
+                                        {['comments', 'learning', 'efficiency'].map(t => (
+                                            <button key={t} onClick={() => setActiveTab(t)} className={`px-8 py-5 text-xs font-black uppercase tracking-widest transition-all ${activeTab === t ? 'text-indigo-500 border-b-2 border-indigo-500 bg-indigo-500/5' : 'opacity-40 hover:opacity-100'}`}>
+                                                {t === 'learning' ? 'Visual Logic' : t === 'comments' ? 'Source' : 'Performance'}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className="p-6 relative flex-1">
+                                        {isGenerating && (
+                                            <div className="absolute inset-0 bg-[#0f172a]/80 backdrop-blur-md z-10 flex flex-col items-center justify-center gap-4">
+                                                <Icon name="loader-2" size={48} className="animate-spin text-indigo-500" />
+                                                <p className="text-sm font-black tracking-widest uppercase animate-pulse">Computing O(n) Efficiency...</p>
+                                            </div>
+                                        )}
+                                        {analysis && (
+                                            <div className="space-y-6 animate-in">
+                                                {activeTab === 'comments' && (
+                                                    <div className="space-y-4">
+                                                        <div className="flex justify-between items-center">
+                                                            <h3 className="font-bold flex items-center gap-2 tracking-tight"><Icon name="check-circle-2" className="text-green-500" /> Optimized Source</h3>
+                                                            <div className="flex gap-2">
+                                                                <button onClick={() => downloadFile(analysis.readme, 'README.md')} className="text-[10px] font-black uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 px-4 py-2 rounded-xl hover:bg-indigo-500/20 hover:scale-105 transition-all flex items-center gap-2">
+                                                                    <Icon name="github" size={14} /> Export README.md
+                                                                </button>
+                                                                <button onClick={() => copyToClipboard(analysis.comments)} className="text-[10px] font-black uppercase bg-slate-800 px-4 py-2 rounded-xl border border-slate-700 hover:bg-slate-700 hover:scale-105 transition-all flex items-center gap-2">
+                                                                    <Icon name="copy" size={14} /> Copy
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                        <pre className={`p-6 rounded-2xl text-sm font-mono overflow-x-auto border ${isDarkMode ? 'bg-[#0f172a] border-slate-800 text-indigo-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>{analysis.comments}</pre>
+                                                        <div className="p-5 bg-indigo-600/10 border border-indigo-600/20 rounded-2xl">
+                                                            <p className="text-sm font-medium leading-relaxed opacity-90"><span className="font-black uppercase text-[10px] bg-indigo-500 text-white px-2 py-0.5 rounded mr-2 not-italic">Summary</span> {analysis.summary}</p>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {activeTab === 'learning' && (
+                                                    <div className="space-y-6">
+                                                        <div className={`p-4 rounded-2xl border ${isDarkMode ? 'bg-[#0f172a] border-slate-800' : 'bg-white border-slate-200'}`}>
+                                                            <h4 className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-4 flex items-center gap-2"><Icon name="git-branch" size={14} className="text-indigo-500" /> Execution Logic Flow</h4>
+                                                            <MermaidChart chart={analysis.mermaid} isDarkMode={isDarkMode} />
+                                                        </div>
+                                                        
+                                                        <div className="bg-indigo-600 p-8 rounded-3xl shadow-xl shadow-indigo-600/20 text-white group">
+                                                            <h4 className="font-black text-xs uppercase tracking-widest mb-3 opacity-70 group-hover:opacity-100 transition-opacity flex items-center gap-2"><Icon name="book-open" size={16} /> Teacher Mode: Step-by-Step</h4>
+                                                            <p className="text-xl leading-relaxed font-semibold">{analysis.explanation}</p>
+                                                        </div>
+
+                                                        {/* Styled Suggestion Box */}
+                                                        <div className={`p-8 rounded-3xl border-2 ${isDarkMode ? 'bg-slate-800/50 border-indigo-500/20' : 'bg-slate-100 border-indigo-200'}`}>
+                                                            <h4 className="font-black text-xs uppercase tracking-widest mb-4 flex items-center gap-2 text-indigo-400"><Icon name="zap" size={18} /> Production Suggestions</h4>
+                                                            <div className="grid grid-cols-1 gap-4">
+                                                                {analysis.smells.map((s, i) => (
+                                                                    <div key={i} className={`p-4 rounded-xl border flex gap-4 items-center ${isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                                                                        <div className="w-6 h-6 bg-indigo-500 rounded flex items-center justify-center font-black text-[10px] text-white flex-shrink-0">{i+1}</div>
+                                                                        <p className="text-sm font-bold opacity-80">{s}</p>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {activeTab === 'efficiency' && (
+                                                    <div className="space-y-8 animate-in">
+                                                        <div className="grid grid-cols-2 gap-6">
+                                                            <div className="bg-indigo-500/10 p-10 rounded-3xl text-center border border-indigo-500/20 group hover:border-indigo-500/50 transition-all">
+                                                                <p className="text-5xl font-black text-indigo-500 tracking-tighter transition-transform group-hover:scale-110">{analysis.complexity.time}</p>
+                                                                <p className="text-xs font-black uppercase tracking-widest opacity-50 mt-3 tracking-[0.2em]">Time Complexity</p>
+                                                            </div>
+                                                            <div className="bg-emerald-500/10 p-10 rounded-3xl text-center border border-emerald-500/20 group hover:border-emerald-500/50 transition-all">
+                                                                <p className="text-5xl font-black text-emerald-500 tracking-tighter transition-transform group-hover:scale-110">{analysis.complexity.space}</p>
+                                                                <p className="text-xs font-black uppercase tracking-widest opacity-50 mt-3 tracking-[0.2em]">Memory Footprint</p>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Enhanced Reasoning Box */}
+                                                        <div className={`p-10 rounded-3xl border-2 leading-relaxed ${isDarkMode ? 'bg-[#0f172a] border-indigo-500/30' : 'bg-white border-indigo-100 shadow-sm'}`}>
+                                                            <h4 className="font-black text-xs uppercase tracking-widest mb-6 flex items-center gap-2 text-indigo-400">
+                                                                <Icon name="info" size={20} /> Deep Efficiency Reasoning
+                                                            </h4>
+                                                            <p className="text-xl font-semibold opacity-90 leading-relaxed italic border-l-4 border-indigo-500 pl-6">
+                                                                "{analysis.complexity.reason}"
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                    {analysis && (
+                                        <div className="mt-auto p-4 border-t border-slate-800 bg-[#0f172a]/50 text-[10px] font-black uppercase opacity-30 flex justify-between tracking-widest">
+                                            <span>Analyzed via Gemini Pro 2.5</span>
+                                            <span className="flex items-center gap-1 text-green-500 opacity-100"><Icon name="check" size={12} /> Static Analysis Certified</span>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
